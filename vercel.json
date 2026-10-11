@@ -1,4 +1,4 @@
-{
+<escape>{
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
     "backend": {
@@ -6,7 +6,7 @@
       "framework": "fastapi"
     },
     "frontend": {
-      "root": "frontend",
+      "root": ".",
       "framework": "vite"
     }
   },
@@ -24,4 +24,4 @@
       }
     }
   ]
-}
+}</escape>
