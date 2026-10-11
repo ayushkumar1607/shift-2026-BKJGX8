@@ -1,66 +1,115 @@
 # EV Shield
 
-EV Shield is a software-first battery security management MVP for electric vehicles with BMS equipment. It includes a React/TypeScript dashboard, a FastAPI API, persistent SQLAlchemy storage, OTP development sign-in, an auditable simulator, assessment and remediation flows, incidents, and a passport JSON export.
+EV Shield is a responsive full-stack demo for security assessment and credential rotation across five fictional BMS profiles. Device connections, assessment evidence, and password changes are visibly labelled as simulated. It does not test or change physical BMS hardware.
 
-**Safety boundary:** `REAL_BMS_WRITES=false` is the default. No physical-device adapters are implemented or validated. Credential rotation is therefore unavailable for hardware; the simulator never changes a physical BMS credential. The simulator is not a physical access-control gateway and does not close possible direct Bluetooth paths.
+## What is included
 
-## Local setup
+- React, TypeScript, Vite, Tailwind CSS, React Router, and Lucide icons.
+- FastAPI REST API with OpenAPI docs at `/docs`.
+- SQLAlchemy models and an Alembic initial schema migration.
+- Persistent SQLite database; per-account simulator credentials use Argon2 hashes.
+- Email or international phone signup/login with an HTTP-only JWT cookie.
+- Five synthetic BMS profiles, backend-generated security assessments, history, retests, password rotation, and credential verification.
+- Read-only Web Bluetooth device selection when supported. No device-specific services, commands, or hardware writes are configured.
+- Frontend and backend automated tests.
 
-Requirements: Python 3.11+, Node.js 20+.
+## Run locally
+
+Use Node.js 20+ and Python 3.10+. From the project root:
 
 ```sh
-cd backend
-python -m venv .venv
+cp .env.example .env
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+python -m pip install -r backend/requirements.txt
+CI=true pnpm install
 ```
 
-In a second terminal:
+Set a unique random `SECRET_KEY` in `.env` before exposing the app beyond a local development machine. Defaults are configured for localhost and keep `REAL_BMS_WRITES=false`.
+
+Start the backend in one terminal:
 
 ```sh
-cd frontend
-npm install
-npm run dev
+uvicorn app.main:app --app-dir backend --reload --host 127.0.0.1 --port 8000
 ```
 
-Open <http://localhost:5173>. In development, sign in with `demo@evshield.local`; the page displays the generated one-time code. This is a local OTP challenge only: without a configured provider, no email or SMS is sent. API documentation is at <http://localhost:8000/docs>.
+Start the frontend in another terminal:
 
-For local development, keep both the API and Vite development server running. Vite proxies `/api` requests to `127.0.0.1:8000`; if sign-in shows “Failed to fetch,” check that the API command above is still running and refresh the page.
+```sh
+CI=true pnpm dev
+```
 
-## Docker
+Open [http://localhost:5173](http://localhost:5173). FastAPI Swagger UI is at [http://localhost:8000/docs](http://localhost:8000/docs).
+Do not open `index.html` directly with a `file://` URL; Vite must serve the TypeScript modules for the app to render.
 
-Set a long random `SECRET_KEY` in the environment, then run `docker compose up --build`. The compose file keeps real writes disabled, uses a persistent SQLite volume, and disables development OTP disclosure. Configure a real OTP delivery provider before exposing authentication beyond local development.
-
-## Data and migrations
-
-SQLite is used by default. Set `DATABASE_URL` to a PostgreSQL SQLAlchemy URL for a production database. Models are in `backend/app/models`; migrations use Alembic:
+The backend creates the SQLite schema and seeds all five profiles on startup. To apply the Alembic migration explicitly before starting the API:
 
 ```sh
 cd backend
-alembic -c alembic.ini upgrade head
+python -m alembic -c alembic.ini upgrade head
+cd ..
 ```
 
-Development demonstration data is seeded separately at API startup: `UP65-DEMO-042`, `UP65-DEMO-043`, and a clearly labelled incident. The assessment does not represent physical measurements.
-
-## Tests and build
+Seed the database manually at any time with:
 
 ```sh
-cd backend && pytest
-cd frontend && npm test && npm run build
+cd backend
+python -m app.seed
+cd ..
 ```
 
-The simulator tests cover unauthorized shim rejection and non-forwarding, authorized simulated access, unknown-state preservation, and the unconditional `CONTROL_BATTERY` block. Real hardware integration, cross-tenant test coverage, production OTP delivery, upload storage, PDF generation, background scheduling, and a production secret manager are not implemented. The interface reports those constraints instead of asserting those validations occurred.
+## Judge demo
 
-## Security and operational notes
+The local-only demo account is:
 
-- Backend endpoints require a signed session token; vehicle queries enforce owner filtering and return 404 for inaccessible vehicle IDs.
-- The development challenge is generated per request, short-lived, and not logged. Production OTP delivery and rate limiting must be added before public deployment.
-- Never submit BMS passwords or secret tokens in the compatibility form. No BMS secret is persisted.
-- Session tokens use an eight-hour expiry. Change `SECRET_KEY` for every deployment and terminate TLS at the production ingress.
-- Public aggregate reporting requires an authority role and suppresses totals below five.
-- No GPS or trip tracking, arbitrary hardware commands, battery-control actions, firmware flashing, or live telemetry are provided.
+- Email: `judge@evshield.demo`
+- Password: `Demo@1234`
 
-## Bluetooth link
+Each seeded simulator device starts with its own account-scoped demo credential, `Demo@1234`. The credential help panel reveals it only in Simulator Mode and only before a device has been rotated. New passwords must be at least 10 characters and contain an uppercase letter, lowercase letter, number, and symbol.
 
-The **Bluetooth Connection** page uses the browser Web Bluetooth chooser to connect to a user-selected GATT device for transport only. The vehicle must be a non-demo registered record. The browser/device must support Web Bluetooth and the page must be served from HTTPS or localhost (desktop Chrome/Edge and some Android browsers). EV Shield does not enumerate undocumented services, read characteristics or telemetry, authenticate the BMS, or write configuration or credentials. Device name and Bluetooth identifier remain in browser memory; the backend audit records only link outcome. A successful GATT connection does not prove that the selected device is the registered BMS or that it is secure.
+1. Sign in with the demo account.
+2. On **Bluetooth Connection**, connect `SecureBMS-S1`. Manufacturer, model, firmware, and interface are filled from the synthetic registry.
+3. Open **BMS Security Assessment** and run the assessment. It should report PASS with 100/100 and full evidence coverage.
+4. Open **Hardware Credential Management**, reveal the initial demo password, and select **Change Password**.
+5. Enter `Demo@1234` as current and choose a new password such as `Shield@Pass2026` in both new password fields.
+6. The success panel appears only after the API confirms that the new value is accepted and the previous value is rejected.
+7. Use **Run Verification Again** to submit both values for a fresh backend check.
+8. Connect `LegacyBMS-L1` to see a different result, or `UnknownBMS-U0` to see unknown evidence.
+
+## Reset the demo
+
+Use **Reset demo data** on Bluetooth Connection and confirm. This resets the signed-in account's synthetic credentials, rotations, assessment history, and active connection. It never contacts physical hardware. The five shared synthetic profiles are restored automatically.
+
+## Tests
+
+Backend tests:
+
+```sh
+cd backend
+python -m pytest -q
+cd ..
+```
+
+Frontend tests and production build:
+
+```sh
+CI=true pnpm test
+CI=true pnpm build
+```
+
+## Authentication and recovery notes
+
+Local demo authentication creates accounts immediately and sets a short-lived JWT in an HTTP-only cookie; no token is stored in browser local storage. No OTP, email, or SMS provider is configured, and EV Shield clearly says no message was sent. The recovery screen likewise reports that recovery delivery is unavailable until an identity provider is configured. The included judge credentials are for local demonstration only.
+
+## Hardware safety
+
+`REAL_BMS_WRITES=false` by default. The real Bluetooth view asks the browser to select a device only after a user click, does not connect to undocumented services or infer identity from the advertised name, and marks device identification as unverified. Credential rotation endpoints accept only the five seeded synthetic profiles with an active Simulator Mode session. UI and API state identify these operations as simulation-only.
+
+## API overview
+
+The documented REST routes cover authentication, profile listing and connection, identification, assessment and retest, credential status, rotation and verification, rotation history, capabilities, and scoped demo reset. OpenAPI request/response schemas are available at `/docs` and `/openapi.json`.
+
+## Deployment
+
+Build the frontend with `CI=true pnpm build` and serve the generated `dist/` directory from a static web host. Set `VITE_API_BASE` to the public HTTPS API origin before building. Run the backend with Uvicorn behind an HTTPS reverse proxy, and set `COOKIE_SECURE=true`, a unique random `SECRET_KEY`, and `CORS_ORIGINS` to the exact frontend origin. Keep `REAL_BMS_WRITES=false`. Point `DATABASE_URL` at a persistent SQLite volume (or configure another SQLAlchemy database URL); the database stores simulator state and must survive restarts. No production email/SMS OTP service or physical BMS adapter is included.
+
